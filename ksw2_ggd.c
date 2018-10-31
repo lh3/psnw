@@ -30,7 +30,7 @@ int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *t
 		for (j = 0; j < qlen; ++j) qp[i++] = p[query[j]];
 	}
 
-	// fill the first row
+	// fill the first row; FIXME: the initial condition should consider pso and pse
 	eh[0].h = 0, eh[0].e = -gapoe - gapoe;
 	for (j = 1; j <= qlen && j <= w; ++j)
 		eh[j].h = -(gapoe + gape * (j - 1)), eh[j].e = -(gapoe + gapoe + gape * j);
@@ -39,8 +39,8 @@ int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *t
 	// DP loop
 	for (i = 0; i < tlen; ++i) { // target sequence is in the outer loop
 		int32_t f = KSW_NEG_INF, h1, st, en;
-		int32_t os = pso? -pso[i] : 0, gapoe_ins = gapoe + os;
-		int32_t es = pse? -pse[i] : 0, gape_del = gape + es, gapoe_del = gapoe + es;
+		int32_t os = pso && i + 1? -pso[i + 1] : 0, gapoe_ins = gapoe + os;
+		int32_t es = pse && i + 1 < tlen? -pse[i + 1] : 0, gape_del = gape + es, gapoe_del = gapoe + es;
 		int8_t *q = &qp[target[i] * qlen];
 		uint8_t *zi = &z[(long)i * n_col];
 		st = i > w? i - w : 0;
