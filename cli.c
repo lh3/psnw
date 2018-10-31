@@ -110,7 +110,6 @@ int main(int argc, char *argv[])
 						}
 					} else if (k == 4) {
 						assert(tlen == q - p);
-						printf("4\t%s\n", p);
 						pse = (int8_t*)p;
 						for (i = 0; i < tlen; ++i) {
 							c = p[i] - '0';
