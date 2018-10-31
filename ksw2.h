@@ -21,7 +21,7 @@ extern "C" {
  * @return          score of the alignment
  */
 int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat, int8_t gapo, int8_t gape, int w,
-		  	int8_t *pso, int *m_cigar_, int *n_cigar_, uint32_t **cigar_);
+			int8_t *pso, int8_t *pse, int *m_cigar_, int *n_cigar_, uint32_t **cigar_);
 
 #ifdef __cplusplus
 }

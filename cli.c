@@ -85,8 +85,9 @@ int main(int argc, char *argv[])
 
 			// parse
 			for (k = 0, p = q = buf;; ++q) {
-				if (*q == 0 || isspace(*q)) {
-					c = *q, *q = 0;
+				if (*q == 0 || *q == '\n' || isspace(*q)) {
+					int oq = *q;
+					*q = 0;
 					if (k == 0) {
 						name = p;
 					} else if (k == 1) {
@@ -109,6 +110,7 @@ int main(int argc, char *argv[])
 						}
 					} else if (k == 4) {
 						assert(tlen == q - p);
+						printf("4\t%s\n", p);
 						pse = (int8_t*)p;
 						for (i = 0; i < tlen; ++i) {
 							c = p[i] - '0';
@@ -117,13 +119,13 @@ int main(int argc, char *argv[])
 						}
 					}
 					++k, p = q + 1;
-					if (c == 0) break;
+					if (oq == 0 || oq == '\n') break;
 				}
 			}
 
 			// perform alignment
 			bw = w > 0? w : tlen > qlen? tlen : qlen;
-			score = ksw_ggd(0, qlen, qseq, tlen, tseq, 5, mat, gapo, gape, bw, pso, &m_cigar, &n_cigar, &cigar);
+			score = ksw_ggd(0, qlen, qseq, tlen, tseq, 5, mat, gapo, gape, bw, pso, pse, &m_cigar, &n_cigar, &cigar);
 
 			// output
 			printf(">%s\t", name);

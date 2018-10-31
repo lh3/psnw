@@ -5,7 +5,7 @@
 typedef struct { int32_t h, e; } eh_t;
 
 int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat, int8_t gapo, int8_t gape, int w,
-		  	int8_t *pso, int *m_cigar_, int *n_cigar_, uint32_t **cigar_)
+			int8_t *pso, int8_t *pse, int *m_cigar_, int *n_cigar_, uint32_t **cigar_)
 {
 	eh_t *eh;
 	int8_t *qp; // query profile
@@ -38,7 +38,9 @@ int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *t
 
 	// DP loop
 	for (i = 0; i < tlen; ++i) { // target sequence is in the outer loop
-		int32_t f = KSW_NEG_INF, h1, st, en, os = pso? -pso[i] : 0, gapoe2 = gapoe + os;
+		int32_t f = KSW_NEG_INF, h1, st, en;
+		int32_t os = pso? -pso[i] : 0, gapoe_ins = gapoe + os;
+		int32_t es = pse? -pse[i] : 0, gape_del = gape + es, gapoe_del = gapoe + es;
 		int8_t *q = &qp[target[i] * qlen];
 		uint8_t *zi = &z[(long)i * n_col];
 		st = i > w? i - w : 0;
@@ -53,7 +55,7 @@ int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *t
 			//   E(i+1,j) = max{H(i,j)-gapo, E(i,j)} - gape
 			//   F(i,j+1) = max{H(i,j)-gapo, F(i,j)} - gape
 			eh_t *p = &eh[j];
-			int32_t h = p->h, e = p->e;
+			int32_t h = p->h, e = p->e, h_ins, h_del;
 			uint8_t d; // direction
 			p->h = h1;
 			h += q[j];
@@ -62,14 +64,15 @@ int ksw_ggd(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *t
 			d = h >= f? d : 2;
 			h = h >= f? h : f;
 			h1 = h;
-			h -= gapoe2;
-			e -= gape;
-			d |= e > h? 0x08 : 0;
-			e  = e > h? e    : h;
+			h_del = h - gapoe_del;
+			e -= gape_del;
+			d |= e > h_del? 0x08 : 0;
+			e  = e > h_del? e    : h_del;
 			p->e = e;
+			h_ins = h - gapoe_ins;
 			f -= gape;
-			d |= f > h? 0x10 : 0; // if we want to halve the memory, use one bit only, instead of two
-			f  = f > h? f    : h;
+			d |= f > h_ins? 0x10 : 0; // if we want to halve the memory, use one bit only, instead of two
+			f  = f > h_ins? f    : h_ins;
 			zi[j - st] = d; // z[i,j] keeps h for the current cell and e/f for the next cell
 		}
 		eh[en].h = h1, eh[en].e = KSW_NEG_INF;
