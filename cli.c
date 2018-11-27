@@ -7,6 +7,15 @@
 
 #define BUF_SIZE 0x10000
 
+#define MALLOC(type, len) ((type*)malloc((len) * sizeof(type)))
+#define CALLOC(type, len) ((type*)calloc((len), sizeof(type)))
+#define REALLOC(ptr, len) ((ptr) = (__typeof__(ptr))realloc((ptr), (len) * sizeof(*(ptr))))
+
+#define EXPAND(a, m) do { \
+		(m) = (m)? (m) + ((m)>>1) : 16; \
+		REALLOC((a), (m)); \
+	} while (0)
+
 unsigned char seq_nt4_table[256] = {
 	0, 1, 2, 3,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
 	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
@@ -38,6 +47,61 @@ static void ksw_gen_simple_mat(int m, int8_t *mat, int8_t a, int8_t b)
 	}
 	for (j = 0; j < m; ++j)
 		mat[(m - 1) * m + j] = 0;
+}
+
+typedef struct {
+	int offset;
+	uint32_t *cigar;
+} shifted_cigar_t;
+
+static shifted_cigar_t *shift_cigar(int n_cigar, const uint32_t *cigar, int tlen, const uint8_t *tseq, int qlen, const uint8_t *qseq, int *n_)
+{
+	int n = 1, m = 8;
+	int gk = -1, glen = -1, gx = -1, gy = -1;
+	int k, x, y;
+	shifted_cigar_t *cs;
+
+	cs = CALLOC(shifted_cigar_t, m);
+	cs[0].cigar = MALLOC(uint32_t, n_cigar);
+	memcpy(cs[0].cigar, cigar, 4 * n_cigar);
+
+	for (k = x = y = 0; k < n_cigar; ++k) {
+		int op = cigar[k] & 0xf, len = cigar[k] >> 4;
+		if (op == 0) x += len, y += len;
+		else {
+			if (len > glen) gk = k, glen = len, gx = x, gy = y; // find the longest gap
+			if (op == 1) y += len;
+			else if (op == 2) x += len;
+		}
+	}
+
+	if (gk > 0 && gk < n_cigar - 1) {
+		int o;
+		for (o = 1, x = gx, y = gy; x < tlen - 1 && y < qlen - 1 && (cigar[gk+1]>>4) - o > 1; ++o, ++x, ++y) { // move the gap to the right
+			if (tseq[x] == qseq[y]) {
+				if (n == m) EXPAND(cs, m);
+				cs[n].cigar = MALLOC(uint32_t, n_cigar);
+				memcpy(cs[n].cigar, cigar, 4 * n_cigar);
+				cs[n].cigar[gk-1] += o<<4;
+				cs[n].cigar[gk+1] -= o<<4;
+				cs[n++].offset = o;
+			} else break;
+		}
+		if ((cigar[gk]&0xf) == 1) gy += cigar[gk]>>4;
+		else gx += cigar[gk]>>4;
+		for (o = -1, x = gx, y = gy; x > 0 && y > 0 && (cigar[gk-1]>>4) - o > 1; --o, --x, --y) { // move the gap to the left
+			if (tseq[x - 1] == qseq[y - 1]) {
+				if (n == m) EXPAND(cs, m);
+				cs[n].cigar = MALLOC(uint32_t, n_cigar);
+				memcpy(cs[n].cigar, cigar, 4 * n_cigar);
+				cs[n].cigar[gk-1] -= (-o)<<4;
+				cs[n].cigar[gk+1] += (-o)<<4;
+				cs[n++].offset = o;
+			} else break;
+		}
+	}
+	*n_ = n;
+	return cs;
 }
 
 int main(int argc, char *argv[])
@@ -81,7 +145,8 @@ int main(int argc, char *argv[])
 			char *name, *p, *q;
 			int8_t *pso = 0, *pse = 0;
 			uint8_t *tseq = 0, *qseq = 0;
-			int i, j, k, l, bw, score, tlen, qlen, nm;
+			int i, j, k, l, bw, score, tlen, qlen, nm, n_cs;
+			shifted_cigar_t *cs;
 
 			// parse
 			for (k = 0, p = q = buf;; ++q) {
@@ -127,55 +192,63 @@ int main(int argc, char *argv[])
 			score = ksw_ggd(0, qlen, qseq, tlen, tseq, 5, mat, gapo, gape, bw, pso, pse, &m_cigar, &n_cigar, &cigar);
 
 			// output
-			printf(">%s\t", name);
-			for (k = 0; k < n_cigar; ++k)
-				printf("%d%c", cigar[k]>>4, "MID"[cigar[k]&0xf]);
-			printf("\tMD:Z:");
-			for (k = i = j = l = nm = 0; k < n_cigar; ++k) {
-				int t, op = cigar[k] & 0xf, len = cigar[k] >> 4;
-				if (op == 0) {
-					for (t = 0; t < len; ++t) {
-						if (tseq[i + t] == qseq[j + t] && tseq[i + t] < 4) {
-							++l;
-						} else {
-							printf("%d%c", l, "ACGTN"[tseq[i + t]]);
-							l = 0, ++nm;
+			cs = shift_cigar(n_cigar, cigar, tlen, tseq, qlen, qseq, &n_cs);
+			printf("SQ\t%s\t%d\n", name, n_cs);
+			for (c = 0; c < n_cs; ++c) {
+				uint32_t *cigar = cs[c].cigar; // WARNING: this shadows "cigar" in the upper level
+				printf("CG\t");
+				for (k = 0; k < n_cigar; ++k)
+					printf("%d%c", cigar[k]>>4, "MID"[cigar[k]&0xf]);
+				printf("\tMD:Z:");
+				for (k = i = j = l = nm = 0; k < n_cigar; ++k) {
+					int t, op = cigar[k] & 0xf, len = cigar[k] >> 4;
+					if (op == 0) {
+						for (t = 0; t < len; ++t) {
+							if (tseq[i + t] == qseq[j + t] && tseq[i + t] < 4) {
+								++l;
+							} else {
+								printf("%d%c", l, "ACGTN"[tseq[i + t]]);
+								l = 0, ++nm;
+							}
 						}
+						i += len, j += len;
+					} else if (op == 1) { // insertion
+						j += len, nm += len;
+					} else { // op == 2
+						printf("%d^", l);
+						for (t = 0; t < len; ++t)
+							putchar("ACGTN"[tseq[i + t]]);
+						l = 0;
+						i += len, nm += len;
 					}
-					i += len, j += len;
-				} else if (op == 1) { // insertion
-					j += len, nm += len;
-				} else { // op == 2
-					printf("%d^", l);
-					for (t = 0; t < len; ++t)
-						putchar("ACGTN"[tseq[i + t]]);
-					l = 0;
-					i += len, nm += len;
 				}
-			}
-			printf("%d\tNM:i:%d\tAS:i:%d\n", l, nm, score);
+				printf("%d\tNM:i:%d\tAS:i:%d\n", l, nm, score);
 
-			// print base alignment
-			for (k = i = j = l = 0; k < n_cigar; ++k) {
-				int t, op = cigar[k] & 0xf, len = cigar[k] >> 4;
-				if (op == 0) {
-					for (t = 0; t < len; ++t) {
-						out[0][l] = "ACGTN"[tseq[i + t]];
-						out[2][l] = "ACGTN"[qseq[j + t]];
-						out[1][l++] = tseq[i + t] == qseq[j + t] && tseq[i + t] < 4? '|' : ' ';
+				// print base alignment
+				for (k = i = j = l = 0; k < n_cigar; ++k) {
+					int t, op = cigar[k] & 0xf, len = cigar[k] >> 4;
+					if (op == 0) {
+						for (t = 0; t < len; ++t) {
+							out[0][l] = "ACGTN"[tseq[i + t]];
+							out[2][l] = "ACGTN"[qseq[j + t]];
+							out[1][l++] = tseq[i + t] == qseq[j + t] && tseq[i + t] < 4? '|' : ' ';
+						}
+						i += len, j += len;
+					} else if (op == 1) { // insertion
+						for (t = 0; t < len; ++t)
+							out[0][l] = '-', out[2][l] = "ACGTN"[qseq[j + t]], out[1][l++] = ' ';
+						j += len;
+					} else { // op == 2
+						for (t = 0; t < len; ++t)
+							out[0][l] = "ACGTN"[tseq[i + t]], out[2][l] = '-', out[1][l++] = ' ';
+						i += len;
 					}
-					i += len, j += len;
-				} else if (op == 1) { // insertion
-					for (t = 0; t < len; ++t)
-						out[0][l] = '-', out[2][l] = "ACGTN"[qseq[j + t]], out[1][l++] = ' ';
-					j += len;
-				} else { // op == 2
-					for (t = 0; t < len; ++t)
-						out[0][l] = "ACGTN"[tseq[i + t]], out[2][l] = '-', out[1][l++] = ' ';
-					i += len;
 				}
+				printf("OT\t%s\nOM\t%s\nOQ\t%s\n", out[0], out[1], out[2]);
+				free(cigar);
 			}
-			printf("%s\n%s\n%s\n", out[0], out[1], out[2]);
+			printf("//\n");
+			free(cs);
 		}
 
 		free(cigar); free(buf);
