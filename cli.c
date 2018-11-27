@@ -107,14 +107,15 @@ static shifted_cigar_t *shift_cigar(int n_cigar, const uint32_t *cigar, int tlen
 int main(int argc, char *argv[])
 {
 	int8_t a = 6, b = 18, gapo = 30, gape = 5;
-	int c, w = -1;
+	int c, w = -1, print_aln = 0;
 
-	while ((c = getopt(argc, argv, "w:A:B:O:E:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:A:B:O:E:a")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'A') a = atoi(optarg);
 		else if (c == 'B') b = atoi(optarg);
 		else if (c == 'O') gapo = atoi(optarg);
 		else if (c == 'E') gape = atoi(optarg);
+		else if (c == 'a') print_aln = 1;
 	}
 	if (argc - optind < 1) {
 		fprintf(stderr, "Usage: psnw [options] <input>\n");
@@ -123,6 +124,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  -B INT        mismatch penalty [%d]\n", b);
 		fprintf(stderr, "  -O INT        gap open penalty [%d]\n", gapo);
 		fprintf(stderr, "  -E INT        gap extension penalty [%d]\n", gape);
+		fprintf(stderr, "  -w INT        band width [inf]\n");
+		fprintf(stderr, "  -a            print detailed base alignment\n");
 		fprintf(stderr, "Note: input format: name, target sequence, query, gap open for ins\n");
 		fprintf(stderr, "  and gap extension for del. TAB delimited.\n");
 		return 1;
@@ -140,6 +143,13 @@ int main(int argc, char *argv[])
 
 		fp = strcmp(argv[optind], "-") == 0? stdin : fopen(argv[optind], "r");
 		assert(fp);
+
+		printf("CC\tCC     comment\n");
+		printf("CC\tSQ     name    #records  AS\n");
+		printf("CC\tCG     cigar   MD        NM\n");
+		printf("CC\tO[123] alignment-strings\n");
+		printf("CC\t//     end-of-report\n");
+		printf("CC\n");
 
 		while (fgets(buf, BUF_SIZE - 1, fp) != NULL) {
 			char *name, *p, *q;
@@ -193,7 +203,7 @@ int main(int argc, char *argv[])
 
 			// output
 			cs = shift_cigar(n_cigar, cigar, tlen, tseq, qlen, qseq, &n_cs);
-			printf("SQ\t%s\t%d\n", name, n_cs);
+			printf("SQ\t%s\t%d\tAS:i:%d\n", name, n_cs, score);
 			for (c = 0; c < n_cs; ++c) {
 				uint32_t *cigar = cs[c].cigar; // WARNING: this shadows "cigar" in the upper level
 				printf("CG\t");
@@ -222,9 +232,10 @@ int main(int argc, char *argv[])
 						i += len, nm += len;
 					}
 				}
-				printf("%d\tNM:i:%d\tAS:i:%d\n", l, nm, score);
+				printf("%d\tNM:i:%d\n", l, nm);
 
 				// print base alignment
+				if (!print_aln) goto end_print;
 				for (k = i = j = l = 0; k < n_cigar; ++k) {
 					int t, op = cigar[k] & 0xf, len = cigar[k] >> 4;
 					if (op == 0) {
@@ -244,7 +255,8 @@ int main(int argc, char *argv[])
 						i += len;
 					}
 				}
-				printf("OT\t%s\nOM\t%s\nOQ\t%s\n", out[0], out[1], out[2]);
+				printf("O1\t%s\nO2\t%s\nO3\t%s\n", out[0], out[1], out[2]);
+end_print:
 				free(cigar);
 			}
 			printf("//\n");
