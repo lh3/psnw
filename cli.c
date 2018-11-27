@@ -146,7 +146,7 @@ int main(int argc, char *argv[])
 
 		printf("CC\tCC     comment\n");
 		printf("CC\tSQ     name    #records  AS\n");
-		printf("CC\tCG     cigar   MD        NM\n");
+		printf("CC\tCG     cigar   MD        NM  AS\n");
 		printf("CC\tO[123] alignment-strings\n");
 		printf("CC\t//     end-of-report\n");
 		printf("CC\n");
@@ -206,6 +206,7 @@ int main(int argc, char *argv[])
 			printf("SQ\t%s\t%d\tAS:i:%d\n", name, n_cs, score);
 			for (c = 0; c < n_cs; ++c) {
 				uint32_t *cigar = cs[c].cigar; // WARNING: this shadows "cigar" in the upper level
+				int sc = 0;
 				printf("CG\t");
 				for (k = 0; k < n_cigar; ++k)
 					printf("%d%c", cigar[k]>>4, "MID"[cigar[k]&0xf]);
@@ -214,6 +215,7 @@ int main(int argc, char *argv[])
 					int t, op = cigar[k] & 0xf, len = cigar[k] >> 4;
 					if (op == 0) {
 						for (t = 0; t < len; ++t) {
+							sc += mat[5 * tseq[i+t] + qseq[j+t]];
 							if (tseq[i + t] == qseq[j + t] && tseq[i + t] < 4) {
 								++l;
 							} else {
@@ -224,15 +226,20 @@ int main(int argc, char *argv[])
 						i += len, j += len;
 					} else if (op == 1) { // insertion
 						j += len, nm += len;
+						sc -= gapo > pso[i]? gapo - pso[i] : 0;
+						sc -= len * gape;
 					} else { // op == 2
 						printf("%d^", l);
-						for (t = 0; t < len; ++t)
+						for (t = 0; t < len; ++t) {
 							putchar("ACGTN"[tseq[i + t]]);
+							sc -= gape > pse[i + t]? gape - pse[i + t] : 0;
+						}
 						l = 0;
 						i += len, nm += len;
+						sc -= gapo;
 					}
 				}
-				printf("%d\tNM:i:%d\n", l, nm);
+				printf("%d\tNM:i:%d\tAS:i:%d\n", l, nm, sc);
 
 				// print base alignment
 				if (!print_aln) goto end_print;
